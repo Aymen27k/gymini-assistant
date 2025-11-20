@@ -1,11 +1,16 @@
 import os
-import time
+import datetime as dt
 import json
 from dotenv import load_dotenv
-#from google import genai, types
+from db.firebase_init import initialize_firebase
+from db.mock_db import log_session_mock, get_all_logs
+from firebase_admin import firestore
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted, InternalServerError, ServiceUnavailable, DeadlineExceeded
 
+# Checking firebase Key exists
+
+USE_FIREBASE = os.path.exists("db/serviceAccountKey.json")
 
 
 
@@ -13,6 +18,8 @@ load_dotenv()
 # Loading the GEMINI key
 GEMINI_API_KEY = os.getenv('GOOGLE_API_KEY')
 
+# Loading the firebase db
+db = initialize_firebase()
 
 # Initialize Gemini
 genai.configure(api_key=GEMINI_API_KEY)
@@ -38,7 +45,7 @@ def ask_gymini(user_input: str, max_attempts=5, delay=1, backoff=2)-> str:
           "exercise": "<name>",
           "sets": <int>,
           "reps": <int>,
-          "weight_kg": <int>
+          "weight_kg": <float>
         }}
         Otherwise, answer normally.
         User: {user_input}
@@ -51,11 +58,12 @@ def ask_gymini(user_input: str, max_attempts=5, delay=1, backoff=2)-> str:
             attempt += 1
     return "Gymini couldn't respond after multiple attempts. Please try again later."
 
+# Agent that log each exercise, either on Firebase or on a Mock_db (depends on the environment)
 def log_session(
     exercise: str,
     sets: int,
     reps: int,
-    weight_kg: int
+    weight_kg: float
 ) -> str:
     """
     Logs a completed set of a weightlifting exercise. This tool must be used
@@ -66,21 +74,42 @@ def log_session(
         exercise: The name of the exercise performed (e.g., 'Bench Press', 'Squat').
         sets: The total number of sets completed for this exercise (e.g., 4).
         reps: The number of repetitions per set (e.g., 12).
-        weight_kg: The working weight used, measured in kilograms (kg) (e.g., 80).
+        weight_kg: The working weight used, measured in kilograms (kg), it can only have one decimal (e.g., 22.5).
     
     Returns:
         A success message indicating the data has been logged.
     """
-    
-    # We will add the actual Firebase logging logic here later.
-    return f"Successfully logged {sets} sets of {reps} reps of {exercise} at {weight_kg}kg."
+    today = dt.date.today().isoformat()
+    if USE_FIREBASE:
+        print("✅ Using FIREBASE DB...")
+        db = firestore.client()
+        doc_ref = db.collection("sessions").document(today)
+        new_exercise = {
+            "timestamp": dt.datetime.now().isoformat(),
+            "exercise": exercise,
+            "sets": sets,
+            "reps": reps,
+            "weight_kg": weight_kg,
+        }
+        doc_ref.set({
+            "date": today,
+            "exercises": firestore.ArrayUnion([new_exercise])
+        }, merge=True)
+        # We will add the actual Firebase logging logic here later.
+        print(f"✅ Successfully logged {sets} sets of {reps} reps of {exercise} at {weight_kg}kg.")
+    else:
+        print("✅ Using Mock DB...")
+        return log_session_mock(exercise, sets, reps, weight_kg)
+
 
 # Controller
 def controller(user_input: str) -> str:
     text = ask_gymini(user_input).strip()
-    print("Raw Gymini output:", text)
+    #print("Raw Gymini output:", text)
+
+    # Remove the extra backticks to get a Raw JSON format.
     if text.startswith("```"):
-        text = text.strip("`")          # remove backticks
+        text = text.strip("`")
         text = text.replace("json", "")
     try:
         data = json.loads(text)
@@ -94,8 +123,12 @@ def controller(user_input: str) -> str:
     except Exception:
         # fallback: just return Gymini's text
         return text
+
 def main():
-    print(controller("I did 4 sets of 8 reps of deadlift at 120 kilos."))
+    controller("I did 4 sets of 5 reps of Squats at 30 kilos.")
+    controller("I did 3 sets of 6 reps of Bench Press at 22.5 kilos.")
+    print(get_all_logs())
+
 
 
 

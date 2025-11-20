@@ -1,12 +1,16 @@
-import os
-import google.generativeai as genai
-from dotenv import load_dotenv
+# adk_wrapper.py
+from main import controller
 
-load_dotenv()
-GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
+# ADK expects a run() function
+def run(input_text: str) -> dict:
+    result = controller(input_text)
+    # Adapt Gymini’s output to ADK schema
+    return {
+        "tool": result["tool"],
+        "exercise": result["exercise"],
+        "sets": result["sets"],
+        "reps": result["reps"],
+        "weight_kg": result["weight_kg"]
+    }
 
-genai.configure(api_key=GEMINI_API_KEY)
-
-model = genai.GenerativeModel("models/gemini-2.5-flash")
-response = model.generate_content("Hello Gymini, give me a workout tip!")
-print(response.text)
+controller("I did 4 sets of 8 reps of Squats at 120 kilos.")
