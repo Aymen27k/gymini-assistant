@@ -4,13 +4,16 @@ import json
 from dotenv import load_dotenv
 from db.firebase_init import initialize_firebase
 from db.mock_db import log_session_mock, get_all_logs
+import agents.memory_agent
+import agents.summary_agent
+import agents.coach_agent
 from firebase_admin import firestore
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted, InternalServerError, ServiceUnavailable, DeadlineExceeded
 
 # Checking firebase Key exists
 
-USE_FIREBASE = os.path.exists("db/serviceAccountKey.json")
+USE_FIREBASE = os.path.exists("db/serviceAccountKey11.json")
 
 
 
@@ -47,16 +50,63 @@ def ask_gymini(user_input: str, max_attempts=5, delay=1, backoff=2)-> str:
           "reps": <int>,
           "weight_kg": <float>
         }}
+        - If the user asks for a workout summary (e.g., "Give me my last session summary"),
+        respond ONLY with a JSON object in this format:
+        {{
+            "tool": "get_summary"
+        }}
+                                              
+        # Coach Agent
+        If the user asks for exercise tips, respond ONLY with a JSON object in this format:
+        {{
+            "tool": "coach_agent",
+            "exercise": "<exercise_name>"
+        }}
+        # Coach Agent Formatter
+        If you are given raw search results (snippets + links) from the coach_agent,
+        rewrite them into a clear, user-friendly coaching response.
+
+        Guidelines:
+        - Summarize into 3–5 actionable tips.
+        - Use a numbered or bulleted list.
+        - Keep each tip short, practical, and motivational.
+        - Preserve source links at the end of each tip.
+        - Speak in a supportive, coach-like tone.
+        - Begin with: "🏋️ Tips for <exercise_name>:"
+                                                     
+        # Memory tools                                      
+        - If the user introduces themselves (e.g., "my name is <X>", "call me <X>"),
+        respond ONLY with this JSON object:
+        {{
+        "tool": "set_name",
+        "name": "<X>"
+        }}
+        - If the user asks to recall their identity (e.g., "what is my name?", "do you remember my name?"),
+        respond ONLY with:
+        {{
+        "tool": "get_name"
+        }}                                                                      
         Otherwise, answer normally.
         User: {user_input}
         """)
-            return response.text
+            raw_text = response.text
+            return personalize_response(raw_text)
         except (ResourceExhausted, InternalServerError, ServiceUnavailable, DeadlineExceeded) as e:
             print(f"Attempt {attempt + 1} failed: {e}")
             time.sleep(delay)
             delay *= backoff
             attempt += 1
     return "Gymini couldn't respond after multiple attempts. Please try again later."
+
+# A wrapper function for Gymini LLM to make the response more personalized
+def personalize_response(response) -> str:
+    data = agents.memory_agent.get_name()
+    name = data.get("user_name") if isinstance(data, dict) else data
+    if name and response.strip().lower() == name.lower():
+        return f"Hey {name}, I remember your name."
+    if name:
+        return response.replace("Hey", f"Hey {name}")
+    return response
 
 # Agent that log each exercise, either on Firebase or on a Mock_db (depends on the environment)
 def log_session(
@@ -120,17 +170,63 @@ def controller(user_input: str) -> str:
                 data["reps"],
                 data["weight_kg"]
             )
+        elif data.get("tool") == "get_summary":
+            data = get_all_logs()
+            raw_summary = agents.summary_agent.get_summary(data)
+            return ask_gymini(
+                f"Rewrite this workout summary in a motivational tone: {raw_summary}"
+            )
+        elif data.get("tool") == "set_name":
+            name = data.get("name")
+            return agents.memory_agent.set_name(name)
+        elif data.get("tool") == "get_name":
+            raw = agents.memory_agent.get_name()
+            return personalize_response(raw)
+        
+        elif data.get("tool") == "coach_agent":
+            #print("I am inside coach agent controller")
+            exercise = data.get("exercise")
+            response_text = agents.coach_agent.ask_coach(exercise)
+            #print(f"This is the response_text from ask_coach : {response_text}")
+            try:
+                response_json = json.loads(response_text)
+            except json.JSONDecodeError:
+                print("Error: response was not valid JSON")
+                return None
+            # Now check the tool field
+            if response_json.get("tool") == "search_web":
+                #print("I am inside search web controller")
+                query = response_json.get("query")
+                results = agents.coach_agent.coach_tools(query)
+                #print(f"Final results : {results}")
+                return ask_gymini(results)
+
     except Exception:
         # fallback: just return Gymini's text
+        print("This is the fallback output...")
         return text
 
+# The Chatbot logic 
+def chat_loop():
+    print("🤖 Gymini is ready! Type 'quit' to exit.")
+    while True:
+        user_input = input("You: ")
+        if user_input.lower() in ["quit", "exit"]:
+            print("Gymini: Goodbye! Keep training strong 💪")
+            break
+        response = controller(user_input)
+        print(f"Gymini: {response}")
+
 def main():
-    controller("I did 4 sets of 5 reps of Squats at 30 kilos.")
-    controller("I did 3 sets of 6 reps of Bench Press at 22.5 kilos.")
-    print(get_all_logs())
+    #controller("I did 4 sets of 5 reps of Squats at 30 kilos.")
+    #controller("I did 3 sets of 6 reps of Bench Press at 22.5 kilos.")
 
+    """ data = get_all_logs()
+    summary = agents.summary_agent.get_summary(data)
+    polished_summary = ask_gymini(f"Rewrite this workout summary in a friendly, motivational tone: {summary}")
+    print(polished_summary) """
 
-
+    chat_loop()
 
 if __name__ == "__main__":
     main()

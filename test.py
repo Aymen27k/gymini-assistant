@@ -1,16 +1,22 @@
-# adk_wrapper.py
-from main import controller
+import os
+import requests
+from dotenv import load_dotenv
+load_dotenv()
 
-# ADK expects a run() function
-def run(input_text: str) -> dict:
-    result = controller(input_text)
-    # Adapt Gymini’s output to ADK schema
-    return {
-        "tool": result["tool"],
-        "exercise": result["exercise"],
-        "sets": result["sets"],
-        "reps": result["reps"],
-        "weight_kg": result["weight_kg"]
+API_KEY = os.getenv("gymini-search-key")
+CX = "d5cf4b299c6f14de3"
+
+def search_web_impl(query: str):
+    url = "https://www.googleapis.com/customsearch/v1"
+    params = {
+        "q": query,
+        "key": API_KEY,
+        "cx": CX,
+        "num": 5
     }
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+    return response.json()
 
-controller("I did 4 sets of 8 reps of Squats at 120 kilos.")
+response = search_web_impl("squat better practices")
+print(response)
