@@ -4,7 +4,7 @@ import uuid
 # This is our mock database: a simple list in memory.
 WORKOUT_LOGS = {}
 
-def log_session_mock(exercise: str, sets: int, reps: int, weight_kg: float) -> str:
+def log_session_mock(exercise: str, sets: int, reps: int, weight_kg: float) -> dict:
     """
     Simulates logging a workout session to a database.
     Instead of writing to Firestore, it appends the data to a Python list.
@@ -39,7 +39,11 @@ def log_session_mock(exercise: str, sets: int, reps: int, weight_kg: float) -> s
     print("---------------------------\n")
 
     # Return a success message formatted like the real Firestore success message
-    return f"✅ Success! Logged {sets} sets of {reps} reps of {exercise} at {weight_kg}kg to Mock DB. (ID: {mock_id})"
+    return {
+    "id": new_exercise["id"],
+    "message": f"✅ Successfully logged {sets} sets of {reps} reps of {exercise} at {weight_kg}kg."
+    }
+
 
 def get_all_logs():
     """Returns the entire mock database list for debugging/verification."""

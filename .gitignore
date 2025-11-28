@@ -145,6 +145,8 @@ env.bak/
 venv.bak/
 serviceAccountKey.json
 firebase-adminsdk.json
+.vscode/
+
 
 # Spyder project settings
 .spyderproject
@@ -207,3 +209,5 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+test.py

@@ -2,27 +2,22 @@ import os
 import datetime as dt
 import json
 from dotenv import load_dotenv
-from db.firebase_init import initialize_firebase
-from db.mock_db import log_session_mock, get_all_logs
+from db.mock_db import get_all_logs
 import agents.memory_agent
 import agents.summary_agent
 import agents.coach_agent
-from firebase_admin import firestore
+import agents.logging_agent
+import agents.evaluation_agent
+import agents.stateful_agent
+from logs import log_event
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted, InternalServerError, ServiceUnavailable, DeadlineExceeded
-
-# Checking firebase Key exists
-
-USE_FIREBASE = os.path.exists("db/serviceAccountKey11.json")
-
 
 
 load_dotenv()
 # Loading the GEMINI key
 GEMINI_API_KEY = os.getenv('GOOGLE_API_KEY')
 
-# Loading the firebase db
-db = initialize_firebase()
 
 # Initialize Gemini
 genai.configure(api_key=GEMINI_API_KEY)
@@ -33,6 +28,8 @@ You are Gymini, an AI workout assistant.
 Your role is to log exercises, suggest routines, and provide coaching tips.
 Always be concise, supportive, and context-aware.
 """
+
+CHAT_HISTORY = []
 
 # Gymini LLM model
 def ask_gymini(user_input: str, max_attempts=5, delay=1, backoff=2)-> str:
@@ -85,7 +82,17 @@ def ask_gymini(user_input: str, max_attempts=5, delay=1, backoff=2)-> str:
         respond ONLY with:
         {{
         "tool": "get_name"
-        }}                                                                      
+        }}
+        # Evaluation tools
+        - If the user ask to run an evaluation or evaluate all the agents.
+        respond ONLY with:
+        {{
+        "tool": "evaluate_agents"
+        }}
+        If the user asks "who made you", "who created you", or similar,
+        respond ONLY with:
+        {{"tool": "get_creator"}}
+                                                                                    
         Otherwise, answer normally.
         User: {user_input}
         """)
@@ -108,50 +115,6 @@ def personalize_response(response) -> str:
         return response.replace("Hey", f"Hey {name}")
     return response
 
-# Agent that log each exercise, either on Firebase or on a Mock_db (depends on the environment)
-def log_session(
-    exercise: str,
-    sets: int,
-    reps: int,
-    weight_kg: float
-) -> str:
-    """
-    Logs a completed set of a weightlifting exercise. This tool must be used
-    immediately when the user provides all four required pieces of information:
-    the exercise name, the number of sets, the repetitions, and the weight used.
-
-    Args:
-        exercise: The name of the exercise performed (e.g., 'Bench Press', 'Squat').
-        sets: The total number of sets completed for this exercise (e.g., 4).
-        reps: The number of repetitions per set (e.g., 12).
-        weight_kg: The working weight used, measured in kilograms (kg), it can only have one decimal (e.g., 22.5).
-    
-    Returns:
-        A success message indicating the data has been logged.
-    """
-    today = dt.date.today().isoformat()
-    if USE_FIREBASE:
-        print("✅ Using FIREBASE DB...")
-        db = firestore.client()
-        doc_ref = db.collection("sessions").document(today)
-        new_exercise = {
-            "timestamp": dt.datetime.now().isoformat(),
-            "exercise": exercise,
-            "sets": sets,
-            "reps": reps,
-            "weight_kg": weight_kg,
-        }
-        doc_ref.set({
-            "date": today,
-            "exercises": firestore.ArrayUnion([new_exercise])
-        }, merge=True)
-        # We will add the actual Firebase logging logic here later.
-        print(f"✅ Successfully logged {sets} sets of {reps} reps of {exercise} at {weight_kg}kg.")
-    else:
-        print("✅ Using Mock DB...")
-        return log_session_mock(exercise, sets, reps, weight_kg)
-
-
 # Controller
 def controller(user_input: str) -> str:
     text = ask_gymini(user_input).strip()
@@ -164,58 +127,93 @@ def controller(user_input: str) -> str:
     try:
         data = json.loads(text)
         if data.get("tool") == "log_session":
-            return log_session(
-                data["exercise"],
-                data["sets"],
-                data["reps"],
-                data["weight_kg"]
-            )
+            exercise = data["exercise"]
+            sets = data["sets"]
+            reps = data["reps"]
+            weight = data["weight_kg"]
+            trace_id = log_event("Log Session", f"Routing to logging_agent with {sets}×{reps} {exercise} at {weight}kg")
+
+            # Call the agent
+            results = agents.logging_agent.log_session(exercise, sets, reps, weight)
+            print(f"Results after calling the agent : {results}")
+            log_event("Logging Agent", f"Exercise logged successfully (ID: {results['id']})", trace_id)
+            return results["message"]
         elif data.get("tool") == "get_summary":
+            trace_id = log_event("Get Summary", "Fetching all workout logs")
             data = get_all_logs()
             raw_summary = agents.summary_agent.get_summary(data)
+            log_event("Summary Agent", f"Generated raw summary: {raw_summary}", trace_id)
             return ask_gymini(
                 f"Rewrite this workout summary in a motivational tone: {raw_summary}"
             )
         elif data.get("tool") == "set_name":
             name = data.get("name")
+            trace_id = log_event("Set Name", f"Name saved successfully: {name}")
+            log_event("Memory Agent", f"Name saved successfully: {name}", trace_id)
             return agents.memory_agent.set_name(name)
         elif data.get("tool") == "get_name":
+            trace_id = log_event("Get Name", "Retrieving stored name")
             raw = agents.memory_agent.get_name()
+            log_event("Memory Agent", f"Retrieved name: {raw}", trace_id)
             return personalize_response(raw)
         
         elif data.get("tool") == "coach_agent":
-            #print("I am inside coach agent controller")
             exercise = data.get("exercise")
+            trace_id = log_event("Coach Agent", f"Received exercise input: {exercise}")
+
             response_text = agents.coach_agent.ask_coach(exercise)
-            #print(f"This is the response_text from ask_coach : {response_text}")
+            log_event("Coach Agent", f"Raw response from ask_coach: {response_text}", trace_id)
             try:
                 response_json = json.loads(response_text)
             except json.JSONDecodeError:
-                print("Error: response was not valid JSON")
+                log_event("Coach Agent", "Error: response was not valid JSON", trace_id)
                 return None
             # Now check the tool field
             if response_json.get("tool") == "search_web":
-                #print("I am inside search web controller")
+
                 query = response_json.get("query")
+                log_event("Coach Agent", f"Delegating to search_web with query: {query}", trace_id)
                 results = agents.coach_agent.coach_tools(query)
-                #print(f"Final results : {results}")
+                log_event("Coach Agent", f"Final results from coach_tools: {results}", trace_id)
+                log_event("Coach Agent", "Delivered motivational confirmation to user", trace_id)
                 return ask_gymini(results)
+        elif data.get("tool") == "evaluate_agents":
+            evaluator = agents.evaluation_agent.EvaluationAgent()
+            results = evaluator.run_all()
+            log_event("Evaluation Agent", f"Completed evaluation: {results}")
+            return ask_gymini(f"Report these evaluation results to the user: {results}")
+        elif data.get("tool") == "get_creator":
+            return "I was made with ❤️ by Aymen Kalaï Ezar."
 
     except Exception:
         # fallback: just return Gymini's text
         print("This is the fallback output...")
         return text
 
-# The Chatbot logic 
-def chat_loop():
+# The Chatbot logic
+def smart_chat_loop():
+    global CHAT_HISTORY
     print("🤖 Gymini is ready! Type 'quit' to exit.")
     while True:
         user_input = input("You: ")
-        if user_input.lower() in ["quit", "exit"]:
+        if not user_input:
+            continue
+        if user_input.lower() == "quit":
             print("Gymini: Goodbye! Keep training strong 💪")
             break
-        response = controller(user_input)
-        print(f"Gymini: {response}")
+
+        # 1. Ask the main agent with history
+        raw_json_response = agents.stateful_agent.ask_main_agent_with_history(user_input, CHAT_HISTORY)
+        
+        # 2. Process JSON through controller
+        final_response = controller(raw_json_response)
+
+        # 3. Update history
+        CHAT_HISTORY.append({"role": "user", "parts": [{"text": user_input}]})
+        CHAT_HISTORY.append({"role": "model", "parts": [{"text": final_response}]})
+
+        # 4. Print response
+        print(f"Gymini: {final_response}")
 
 def main():
     #controller("I did 4 sets of 5 reps of Squats at 30 kilos.")
@@ -226,7 +224,7 @@ def main():
     polished_summary = ask_gymini(f"Rewrite this workout summary in a friendly, motivational tone: {summary}")
     print(polished_summary) """
 
-    chat_loop()
+    smart_chat_loop()
 
 if __name__ == "__main__":
     main()
