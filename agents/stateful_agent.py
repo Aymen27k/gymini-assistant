@@ -1,6 +1,4 @@
-import os
 import google.generativeai as genai
-from dotenv import load_dotenv
 
 
 def ask_main_agent_with_history(user_input: str, history: list[dict]) -> str:
@@ -15,6 +13,8 @@ def ask_main_agent_with_history(user_input: str, history: list[dict]) -> str:
         # return the raw prompt unchanged ask_gymini can handle it.
         return user_input
     if "who made you" in lowered or "who created you" in lowered:
+      return user_input
+    if "what can you do" in lowered or "help" in lowered:
       return user_input
     
     model = genai.GenerativeModel("models/gemini-2.5-flash")
@@ -42,5 +42,4 @@ def ask_main_agent_with_history(user_input: str, history: list[dict]) -> str:
 
     User: {user_input}
     """)
-    print(response.text)
     return response.text.strip()

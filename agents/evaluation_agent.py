@@ -22,7 +22,7 @@ class EvaluationAgent:
         return {
             "log_session": self.evaluate_log_session(),
             "coach_agent": self.evaluate_coach_agent(),
-            # add more evaluations here
+            
         }
 if __name__ == "__main__":
     evaluator = EvaluationAgent()
