@@ -32,11 +32,14 @@ def log_session_mock(exercise: str, sets: int, reps: int, weight_kg: float) -> d
     # "Write" the data to the mock database
     WORKOUT_LOGS[today]["exercises"].append(new_exercise)
 
-    # Print the log locally for the reviewer to verify it was "saved"
-    print("\n--- MOCK DB LOGGED DATA ---")
+
+
+    # Debug Mode (optional for reviewers):
+    # Uncomment to print raw DB state, including all logged exercises and total count.
+    """ print("\n--- MOCK DB LOGGED DATA ---")
     print(f"Logged: {WORKOUT_LOGS}")
     print(f"Total Logs in Mock DB: {len(WORKOUT_LOGS)}")
-    print("---------------------------\n")
+    print("---------------------------\n") """
 
     # Return a success message formatted like the real Firestore success message
     return {
