@@ -56,6 +56,7 @@ def controller(user_input: str) -> str:
         # then rewrites it into a motivational tone for the user.
         elif data.get("tool") == "get_summary":
             trace_id = log_event("Get Summary", "Fetching all workout logs")
+            # This only will get data while working with mock_db
             data = get_all_logs()
             raw_summary = agents.summary_agent.get_summary(data)
             log_event("Summary Agent", f"Generated raw summary: {raw_summary}", trace_id)
@@ -142,6 +143,7 @@ def controller(user_input: str) -> str:
 
     except Exception:
         # Friendly fallback: explain Gymini's abilities
+        print("This is the fallback agent...")
         return agents.gymini_agent.ask_gymini(
             f"Analyze user input ({text}) and suggest the closest feature Gymini can perform. "
             f"Available features: log workouts, workout summaries, coaching tips, memory (name). "
