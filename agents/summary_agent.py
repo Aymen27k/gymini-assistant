@@ -1,23 +1,29 @@
 import db.mock_db
+from db.firebase_db import get_last_session
+import datetime as dt
 
 
-def get_summary(mock_db, last_session=True):
-    # Step 1: Find the latest session (last date key)
-    last_date = max(mock_db.keys())  # e.g. "2025-11-20"
-    session = mock_db[last_date]
+def get_summary(last_session=True) -> dict:
+    """
+    Summarize the latest workout session from Firebase.
+    Returns a dict with id + message for consistency.
+    """
+    session = get_last_session()
+    if not session:
+        return {"id": "summary", "message": "No workouts logged yet."}
 
-    # Step 2: Extract exercises
-    exercises = session["exercises"]
+    date = session["date"]
+    exercises = session.get("exercises", [])
 
-    # Step 3: Build summary string
+    if not exercises:
+        return {"id": "summary", "message": f"No exercises logged for {date}."}
+
     summary_parts = []
     for ex in exercises:
-        # Format float cleanly: 30.0 → 30, 22.5 → 22.5
-        weight = int(ex["weight_kg"]) if ex["weight_kg"].is_integer() else ex["weight_kg"]
-        summary_parts.append(
-            f"{ex['sets']}×{ex['reps']} {ex['exercise']} at {weight}kg"
-        )
+        weight = int(ex["weight_kg"]) if float(ex["weight_kg"]).is_integer() else ex["weight_kg"]
+        summary_parts.append(f"{ex['sets']}×{ex['reps']} {ex['exercise']} at {weight}kg")
 
-    # Step 4: Return natural summary
-    return f"On {last_date}, you did " + " and ".join(summary_parts) + "."
-
+    return {
+        "id": "summary",
+        "message": f"On {date}, you did " + " and ".join(summary_parts) + "."
+    }

@@ -1,15 +1,10 @@
 import os
 import datetime as dt
-from firebase_admin import firestore
-from db.firebase_init import initialize_firebase
 from db.mock_db import log_session_mock
+from db.firebase_db import save_session
 
 # Checking firebase Key exists
 USE_FIREBASE = os.path.exists("db/serviceAccountKey11.json")
-
-
-# Loading the firebase db
-db = initialize_firebase()
 
 # Agent that log each exercise, either on Firebase or on a Mock_db (depends on the environment)
 def log_session(
@@ -33,23 +28,17 @@ def log_session(
         A success message indicating the data has been logged.
     """
     today = dt.date.today().isoformat()
+    new_exercise = {
+        "timestamp": dt.datetime.now().isoformat(),
+        "exercise": exercise,
+        "sets": sets,
+        "reps": reps,
+        "weight_kg": weight_kg,
+    }
     if USE_FIREBASE:
         print("✅ Using FIREBASE DB...")
-        db = firestore.client()
-        doc_ref = db.collection("sessions").document(today)
-        new_exercise = {
-            "timestamp": dt.datetime.now().isoformat(),
-            "exercise": exercise,
-            "sets": sets,
-            "reps": reps,
-            "weight_kg": weight_kg,
-        }
-        doc_ref.set({
-            "date": today,
-            "exercises": firestore.ArrayUnion([new_exercise])
-        }, merge=True)
-        # We will add the actual Firebase logging logic here later.
-        print(f"✅ Successfully logged {sets} sets of {reps} reps of {exercise} at {weight_kg}kg.")
+        results = save_session(today, new_exercise)
+        return results 
     else:
         print("✅ Using Mock DB...")
         return log_session_mock(exercise, sets, reps, weight_kg)
