@@ -4,7 +4,7 @@ from db.mock_db import log_session_mock
 from db.firebase_db import save_session
 
 # Checking firebase Key exists
-USE_FIREBASE = os.path.exists("db/serviceAccountKey11.json")
+USE_FIREBASE = os.path.exists("db/serviceAccountKey.json")
 
 # Agent that log each exercise, either on Firebase or on a Mock_db (depends on the environment)
 def log_session(
